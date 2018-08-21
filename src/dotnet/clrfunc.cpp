@@ -378,6 +378,7 @@ v8::Local<v8::Object> ClrFunc::MarshalCLRObjectToV8(System::Object^ netdata)
     Nan::EscapableHandleScope scope;
     v8::Local<v8::Object> result = Nan::New<v8::Object>();
     System::Type^ type = netdata->GetType();
+	bool isException = System::Exception::typeid->IsAssignableFrom(type);
 
     if (type->FullName->StartsWith("System.Reflection")) {
         // Avoid stack overflow due to self-referencing reflection elements
@@ -413,13 +414,34 @@ v8::Local<v8::Object> ClrFunc::MarshalCLRObjectToV8(System::Object^ netdata)
             }
         }
 
+		
         MethodInfo^ getMethod = property->GetGetMethod();
         if (getMethod != nullptr && getMethod->GetParameters()->Length <= 0)
         {
+			System::Object^ object = getMethod->Invoke(netdata, nullptr);
+
+			// Avoid stack overflow
+			if (object != nullptr && isException)
+			{
+				System::Type^ _type = object->GetType();
+
+				if (System::Exception::typeid->IsAssignableFrom(_type))
+					continue;
+
+				if (_type->IsArray)
+				{
+					array<Object^>^ objectArray = dynamic_cast<array<Object^>^>(object);
+					if (objectArray != nullptr && objectArray->Length > 0)
+					{
+						if (System::Exception::typeid->IsAssignableFrom(objectArray[0]->GetType()))
+							continue;
+					}
+				}
+			}
             result->Set(
                 Nan::GetCurrentContext(),
                 stringCLR2V8(property->Name),
-                ClrFunc::MarshalCLRToV8(getMethod->Invoke(netdata, nullptr)));
+                ClrFunc::MarshalCLRToV8(object));
         }
     }
 
